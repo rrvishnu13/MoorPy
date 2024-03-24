@@ -2,8 +2,6 @@
 
 import numpy as np
 
-
-
 class Point():
     '''A class for any object in the mooring system that can be described by three translational coorindates'''
     
@@ -50,7 +48,10 @@ class Point():
         self.number = num
         self.type = type                # 1: fixed/attached to something, 0 free to move, or -1 coupled externally
         self.r = np.array(r, dtype=np.float_)
-                
+        self.entity = {type:''}         # dict for entity (e.g. anchor) info
+        self.cost = {}                  # empty dictionary to contain cost info
+        self.loads = {}                 # empty dictionary to contain load info
+        
         self.m  = float(m)
         self.v  = float(v)
         self.CdA= float(CdA)
@@ -145,8 +146,10 @@ class Point():
             raise ValueError(f"Point setPosition method requires an argument of size 3 or nDOF, but size {len(r):d} was provided")
         
         # update the point's depth and position based on relation to seabed
-        self.zSub = np.max([-self.zTol, -self.r[2] - self.sys.depth])   # depth of submergence in seabed if > -zTol
-        self.r = np.array([self.r[0], self.r[1], np.max([self.r[2], -self.sys.depth])]) # don't let it sink below the seabed
+        depth, _ = self.sys.getDepthFromBathymetry(self.r[0], self.r[1]) 
+        
+        self.zSub = np.max([-self.zTol, -self.r[2] - depth])   # depth of submergence in seabed if > -zTol
+        self.r = np.array([self.r[0], self.r[1], np.max([self.r[2], -depth])]) # don't let it sink below the seabed
         
         # update the position of any attached Line ends
         for LineID,endB in zip(self.attached,self.attachedEndB):
@@ -208,7 +211,11 @@ class Point():
                 
         # add forces from attached lines
         for LineID,endB in zip(self.attached,self.attachedEndB):
-            f += self.sys.lineList[LineID-1].getEndForce(endB)
+            # f += self.sys.lineList[LineID-1].getEndForce(endB)
+            if endB:
+                f += self.sys.lineList[LineID-1].fB
+            else:
+                f += self.sys.lineList[LineID-1].fA
         
         if xyz:
             return f
@@ -326,13 +333,38 @@ class Point():
             # if on seabed, apply a large stiffness to help out system equilibrium solve (if it's transitioning off, keep it a small step to start with)    
             if self.r[2] == -self.sys.depth:
                 K[2,2] += 1.0e12
-        
+        if sum(np.isnan(K).ravel()) > 0: breakpoint()
         if xyz:                     # if asked to output all DOFs, do it
             return K
         else:                       # otherwise only return rows/columns of active DOFs
             return K[:,self.DOFs][self.DOFs,:]
         
+    
+    def getCost(self):
+        '''Fill in and returns a cost dictionary for this Point object.
+        So far it only applies for if the point is an anchor.'''
         
+        from moorpy.MoorProps import getAnchorCost
+        
+        self.cost = {'material':0}  # clear any old cost numbers and start with 0
+        
+        # figure out if it should be an anchor if it isn't already defined
+        if self.entity['type'] == '':
+            depth, _ = self.sys.getDepthFromBathymetry(self.r[0], self.r[1]) 
+            if self.r[3] == depth and self.type==1:  # if it's fixed on the seabed
+                self.entity['type'] = 'anchor'       # assume it's an anchor
+                if self.FA[2] == 0:
+                    self.entity['anchor_type'] = 'drag-embedment'
+                else:
+                    self.entity['anchor_type'] = 'suction'
+        
+        # calculate costs if it's an anchor (using simple model)
+        if self.entity['type'] == 'anchor':
+            self.cost['material'] = getAnchorCost(self.loads['fx_max'], 
+                                                  self.loads['fz_max'],
+                                             type=self.entity['anchor_type'])
+        
+        return cost    
         
 
 
