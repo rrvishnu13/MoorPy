@@ -753,9 +753,14 @@ class System():
                             rRel = np.array(entries[2:5], dtype=float)
                             self.bodyList[BodyID-1].attachPoint(num, rRel)
                             
-                        elif ("fair" in entry1) or ("ves" in entry1) or ("couple" in entry1):
+                        elif ("fair" in entry1) or ("ves" in entry1) or ("couple" in entry1) or ("Coupled" in entry1):
                             # for coupled point type, just set it up that same way in MoorPy (attachment to a body not needed, right?)
-                            pointType = -1                            
+                            pointType = -1
+                            
+                            if len(self.bodyList) == 1:
+                                pointType = 1
+                                self.bodyList[0].attachPoint(pointID = num, rAttach =np.array(entries[2:5], dtype=float))
+
                             '''
                             # attach to a generic platform body (and make it if it doesn't exist)
                             if len(self.bodyList) > 1:
