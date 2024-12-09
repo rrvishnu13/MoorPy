@@ -563,7 +563,10 @@ class System():
                         else:
 
                             try:
-                                lineType['EA'] = float(entries[3].split('|')[0])         # get EA, and only take first value if multiples are given
+                                EA_vals = entries[3].split('|')
+                                lineType['EA'] = float(EA_vals[0])         # get EA, and only take first value if multiples are given
+                                if len(EA_vals)==2 :
+                                    lineType['EAd'] = float(EA_vals[1]) #case of synthetic lines - the second term is the dynamic stiffness
                             except:
                                 lineType['EA'] = 1e9
                                 print('EA entry not recognized - using placeholder value of 1000 MN')
@@ -1015,7 +1018,7 @@ class System():
 
 
     def unload(self, fileName, MDversion=2, line_dL=0, rod_dL=0, flag='p', 
-               outputList=[], Lm=0, T_half=42):
+               outputList=[], Lm=0, T_half=42, writeBodyFlag=True):
         '''Unloads a MoorPy system into a MoorDyn-style input file
 
         Parameters
@@ -1272,17 +1275,21 @@ class System():
                 
                 
             L.append("---------------------- LINE TYPES --------------------------------------------------")
-            L.append("TypeName      Diam     Mass/m     EA     BA/-zeta     EI        Cd      Ca      CdAx    CaAx")
-            L.append("(name)        (m)      (kg/m)     (N)    (N-s/-)    (N-m^2)     (-)     (-)     (-)     (-)")
+            L.append("TypeName          Diam     Mass/m     EA     BA/-zeta     EI        Cd      Ca      CdAx    CaAx")
+            L.append("(name)            (m)      (kg/m)     (N)    (N-s/-)    (N-m^2)     (-)     (-)     (-)     (-)")
             
             for key, lineType in self.lineTypes.items(): 
                 di = lineTypeDefaults.copy()  # start with a new dictionary of just the defaults
                 di.update(lineType)           # then copy in the lineType's existing values
                 if 'EAd' in di.keys() and di['EAd'] > 0:
-                    if Lm > 0:
+                    Lm = di.get('Lm', Lm) #if not present then use the default values
+                    # Get dynamic stiffness including mean load dependence
+                    
+                    EAd = di['EAd'] + di['EAd_Lm']*Lm*di['MBL']
+
+                    if EAd > di['EA']:
                         print('Calculating dynamic stiffness with Lm = ' + str(Lm)+'* MBL')
-                        # Get dynamic stiffness including mean load dependence
-                        EAd = di['EAd'] + di['EAd_Lm']*Lm*di['MBL']
+
                         # This damping value is chosen for critical damping of a 10 m segment
                         c2 = 10 * np.sqrt(di['EA'] * di['m'])
                         # or use c1 = di['BA'] ?
@@ -1296,15 +1303,14 @@ class System():
 
                         c1 = (K1+K2)/(2*np.pi/T_half) * np.sqrt(((K1+frac*K2)**2 - K1**2)/((K1+K2)**2 - (K1+frac*K2)**2))
                         
-                        
-                        L.append("{:<12} {:7.4f} {:8.2f}  {:7.3e}|{:7.3e} {:7.3e}|{:7.3e} {:7.3e}   {:<7.3f} {:<7.3f} {:<7.2f} {:<7.2f}".format(
+                        L.append("{:<16} {:7.4f} {:8.2f}  {:7.3e}|{:7.3e} {:7.3e}|{:7.3e} {:7.3e}   {:<7.3f} {:<7.3f} {:<7.2f} {:<7.2f}".format(
                              key, di['d_vol'], di['m'], di['EA'], EAd, c1, c2, di['EI'], di['Cd'], di['Ca'], di['CdAx'], di['CaAx']))
                     else:
-                        print('No mean load provided!!! using the static EA value ONLY')
-                        L.append("{:<12} {:7.4f} {:8.2f}  {:7.3e} {:7.3e} {:7.3e}   {:<7.3f} {:<7.3f} {:<7.2f} {:<7.2f}".format(
+                        print('Dynamic Stiffness less than static stiffness !!! using the static EA value ONLY')
+                        L.append("{:<16} {:7.4f} {:8.2f}  {:7.3e} {:7.3e} {:7.3e}   {:<7.3f} {:<7.3f} {:<7.2f} {:<7.2f}".format(
                                  key, di['d_vol'], di['m'], di['EA'], di['BA'], di['EI'], di['Cd'], di['Ca'], di['CdAx'], di['CaAx']))
                 else:
-                    L.append("{:<12} {:7.4f} {:8.2f}  {:7.3e} {:7.3e} {:7.3e}   {:<7.3f} {:<7.3f} {:<7.2f} {:<7.2f}".format(
+                    L.append("{:<16} {:7.4f} {:8.2f}  {:7.3e} {:7.3e} {:7.3e}   {:<7.3f} {:<7.3f} {:<7.2f} {:<7.2f}".format(
                              key, di['d_vol'], di['m'], di['EA'], di['BA'], di['EI'], di['Cd'], di['Ca'], di['CdAx'], di['CaAx']))
             
             
@@ -1329,17 +1335,18 @@ class System():
             L.append("ID   Attachment    X0     Y0     Z0     r0      p0     y0     Mass          CG*          I*      Volume   CdA*   Ca*")
             L.append("(#)     (-)        (m)    (m)    (m)   (deg)   (deg)  (deg)   (kg)          (m)         (kg-m^2)  (m^3)   (m^2)  (-)")
             
-            for body in self.bodyList:
-                attach = ['coupled','free','fixed'][[-1,0,1].index(body.type)]                      # pick correct string based on body type
-                L.append("{:<4d}  {:10}  {:<6.2f} {:<6.2f} {:<6.2f} {:<6.2f} {:<6.2f} {:<6.2f} ".format(
-                         body.number, attach, body.r6[0],body.r6[1],body.r6[2],np.rad2deg(body.r6[3]),np.rad2deg(body.r6[4]),np.rad2deg(body.r6[5])
-                         )+ "{:<9.4e}  {:.2f}|{:.2f}|{:.2f} {:9.3e} {:6.2f} {:6.2f} {:5.2f}".format(
-                         body.m, body.rCG[0],body.rCG[1],body.rCG[2], body.I[0], body.v, body.CdA[0], body.Ca[0]))
-                         
-                         # below is a more thorough approach to see about in future
-                         #)+ "{:<9.2f}  {:<5.2f}|{:<5.2f}|{:<5.2f}  {:<5.2f}|{:<5.2f}|{:<5.2f}  {:<5.2f}  {:<5.2f}|{:<5.2f}|{:<5.2f}  {:<5.2f}|{:<5.2f}|{:<5.2f}".format(
-                         #body.m, body.rCG[0],body.rCG[1],body.rCG[2], body.I[0],body.I[1],body.I[2],
-                         #body.v, body.CdA[0],body.CdA[1],body.CdA[2], body.Ca[0],body.Ca[1],body.Ca[2]))
+            if writeBodyFlag:
+                for body in self.bodyList:
+                    attach = ['coupled','free','fixed'][[-1,0,1].index(body.type)]                      # pick correct string based on body type
+                    L.append("{:<4d}  {:10}  {:<6.2f} {:<6.2f} {:<6.2f} {:<6.2f} {:<6.2f} {:<6.2f} ".format(
+                            body.number, attach, body.r6[0],body.r6[1],body.r6[2],np.rad2deg(body.r6[3]),np.rad2deg(body.r6[4]),np.rad2deg(body.r6[5])
+                            )+ "{:<9.4e}  {:.2f}|{:.2f}|{:.2f} {:9.3e} {:6.2f} {:6.2f} {:5.2f}".format(
+                            body.m, body.rCG[0],body.rCG[1],body.rCG[2], body.I[0], body.v, body.CdA[0], body.Ca[0]))
+                            
+                            # below is a more thorough approach to see about in future
+                            #)+ "{:<9.2f}  {:<5.2f}|{:<5.2f}|{:<5.2f}  {:<5.2f}|{:<5.2f}|{:<5.2f}  {:<5.2f}  {:<5.2f}|{:<5.2f}|{:<5.2f}  {:<5.2f}|{:<5.2f}|{:<5.2f}".format(
+                            #body.m, body.rCG[0],body.rCG[1],body.rCG[2], body.I[0],body.I[1],body.I[2],
+                            #body.v, body.CdA[0],body.CdA[1],body.CdA[2], body.Ca[0],body.Ca[1],body.Ca[2]))
                           
             
             L.append("---------------------- RODS ---------------------------------------------------------")
@@ -3060,7 +3067,14 @@ class System():
                     return 
             return(ratios)
     
-    
+    def storeMeanTensions(self, display = 0):
+        '''
+        Stores the mean tensions of polyester line -> this mean tension is then used to calcuate the dynamic stiffness term
+        '''
+        for line in self.lineList:
+            line.calcLm(display = display)
+
+
     def activateDynamicStiffness(self, display=0):
         '''Switch mooring system model to dynamic line stiffness values and 
         adjust the unstretched line lengths to maintain the same tensions. 

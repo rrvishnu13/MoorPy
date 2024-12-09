@@ -5,7 +5,9 @@ import yaml
 import os
 import re
 
- 
+
+import copy
+
 # base class for MoorPy exceptions
 class Error(Exception):
     ''' Base class for MoorPy exceptions'''
@@ -1641,3 +1643,58 @@ def read_output_file(dirName,fileName, skiplines=-1, hasunits=1, chanlim=999, di
         return dataDict, unitDict
     else:
         return data3, ch, channels, units
+
+
+def duplicateSyntheticLines(inputMs):
+    '''
+    Reads in a MoorPy system and duplicates linetypes with nonzero EAd. 
+    Needed for system unload to work with  multiple mean load values
+    '''
+
+    ms = copy.deepcopy(inputMs)
+
+    # list of line types with nonzero EAd
+    types = []
+    for key, lineType in ms.lineTypes.items():
+        if 'EAd' in lineType.keys() and lineType['EAd'] > 0:
+            types.append(lineType['name'])
+
+
+    if len(types) > 0:
+
+        #iterate through types with nonzero EAd
+        for t in types:
+
+            #store indexes of lines that use that line type
+            inds = []
+            for i, line in enumerate(ms.lineList):
+                if line.type['name'] == t:
+                    inds.append(i)
+
+            names = []
+            pos = list(ms.lineTypes.keys()).index(t)
+            items = list(ms.lineTypes.items()) # creates a list of tuples from the dictionary   
+            
+
+            # make copies of lineType (so that each segment with nonzero EAd has unique LineType)
+            for j, i in enumerate(inds):
+                
+                insPos = pos + j + 1   # insert the copies right below the existing linetype to make ordering more logical
+                lType_name = t + '_' + str(i + 1)
+
+                items.insert(insPos, (lType_name, copy.deepcopy(ms.lineTypes[t]))) # add the line number to the type for easy identification
+                items[insPos][1]['name'] = lType_name #rename the 'name' parameter of the lineType
+                # items[insPos][1]['material'] = lType_name
+                names.append(lType_name)
+
+            ms.lineTypes = dict(items)
+
+            #make sure each line points to the correct lineType
+            for j, i in enumerate(inds):
+                ms.lineList[i].type = ms.lineTypes[names[j]]
+
+            ms.lineTypes.pop(t) #remove the original lineType as it has been duplicated for a line
+
+        return(ms)
+    else:
+        print('No lines have nonzero EAd') 

@@ -979,6 +979,27 @@ class Line():
     def attachLine(self, lineID, endB):
         pass
 
+    
+    def calcLm(self, display=0):
+        ''' 
+        Calculate the value of Lm  = Tension/MBL for the line - used to calculate the dynamic stiffness of the line type
+        
+        Make sure the condition corresponds to the condition in which mean load has been applied and each line has its own copy of line type 
+
+        '''
+        
+        if 'EAd' in self.type.keys() and self.type['EAd'] > 0:
+            # calculate and store the mean load value
+            self.type['Lm'] = np.mean([self.TA, self.TB])/self.type['MBL']  
+            
+            if display > 0 :
+                print(f'Line {self.number} Mean load = {self.type["Lm"] * self.type['MBL']:.2f} N, Lm = {self.type["Lm"]:.2f}')
+                  
+        else:
+            if display > 0:
+                print(f'Line {self.number} has zero dynamic stiffness coefficient so calcLm does nothing.')
+
+
 
     def activateDynamicStiffness(self, display=0):
         '''Switch mooring line model to dynamic line stiffness value, 
@@ -986,7 +1007,7 @@ class Line():
         current state as the mean/static offset position to work from. 
         This only works when dynamic line properties are used.'''
         
-        if self.type['EAd'] > 0:
+        if 'EAd' in self.type.keys() and self.type['EAd'] > 0:
             # switch to dynamic stiffness value
             EA_old = self.type['EA']
             EA_new = self.type['EAd'] + self.type['EAd_Lm']*np.mean([self.TA, self.TB])  # this implements the sloped Krd = alpha + beta*Lm
